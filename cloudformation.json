@@ -1,0 +1,198 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Parameters": {
+        "S3BucketName": {
+            "Type": "String",
+            "Default": "email-store"
+        },
+        "SageMakerEndpointID": {
+            "Type": "String",
+            "Description": "SageMaker Endpoint Name"
+        },
+        "ServiceEmailAddress": {
+            "Type": "String",
+            "Description": "Spam Detection Email address"
+        }
+    },
+    "Resources": {
+            "LF3": {
+                "Type": "AWS::Lambda::Function",
+                "Properties": {
+                "FunctionName": "LF3",
+                "Handler": "lambda_function.lambda_handler",
+                "Runtime": "python3.7",
+                "Code": {
+                    "S3Bucket": "hw3-6998-bucket-new",
+                    "S3Key": "lambda_function.py.zip"
+                },
+                "Description": "spam-handler",
+                "MemorySize": 128,
+                "Timeout": 30,
+                "Role": {
+                    "Fn::GetAtt": [
+                        "LambdaExecutionRole",
+                        "Arn"
+                    ]
+                },
+                "Environment": {
+                    "Variables": {
+                        "REGION": "us-east-1",
+                        "sagemaker_endpoint": { "Ref" : "SageMakerEndpointID" },
+                        "spam_detect_email_addr": { "Ref" : "ServiceEmailAddress"}
+                    }
+                }
+            }
+        },
+        "LogGroup": {
+            "Type": "AWS::Logs::LogGroup",
+            "Properties": {
+                "RetentionInDays": 7
+            }
+        },
+        "LambdaInvokePermission": {
+            "Type": "AWS::Lambda::Permission",
+            "DependsOn": "LF3",
+            "Properties": {
+                "FunctionName": {
+                    "Fn::GetAtt": [
+                        "LF3",
+                        "Arn"
+                    ]
+                },
+                "Action": "lambda:InvokeFunction",
+                "Principal": "s3.amazonaws.com",
+                "SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                },
+                "SourceArn": {
+                    "Fn::Sub": "arn:aws:s3:::${S3BucketName}"
+                }
+            }
+        },
+        "B1": {
+            "DependsOn": "LambdaInvokePermission",
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "BucketName": {
+                "Fn::Sub": "${S3BucketName}"
+            },
+                "NotificationConfiguration": {
+                    "LambdaConfigurations": [
+                        {
+                            "Event": "s3:ObjectCreated:*",
+                            "Function": {
+                                "Fn::GetAtt": [
+                                    "LF3",
+                                    "Arn"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "S3BP4IUMA": {
+            "Type": "AWS::S3::BucketPolicy",
+            "Properties": {
+                "PolicyDocument": {
+                    "Id": "MyPolicy",
+                    "Version": "2012-10-17",
+                        "Statement": [
+                       {
+                           "Sid": "AllowSESPuts",
+                           "Effect": "Allow",
+                           "Principal": {
+                               "Service": "ses.amazonaws.com"
+                           },
+                           "Action": "s3:PutObject",
+                           "Resource": {
+                                "Fn::Join": [
+                                    "",
+                                    [
+                                        "arn:aws:s3:::",
+                                        {
+                                            "Ref": "B1"
+                                        },
+                                        "/*"
+                                    ]
+                                ]
+                            }
+                       }
+                   ]
+                },
+                "Bucket": {
+                    "Ref": "B1"
+                }
+            },
+            "DependsOn": [
+                "B1"
+            ]
+        },
+        "LambdaExecutionRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/AWSCloudFormationFullAccess",
+                    "arn:aws:iam::aws:policy/AmazonSageMakerFullAccess",
+                    "arn:aws:iam::aws:policy/AmazonSESFullAccess",
+                    "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+                ],
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "root",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:*"
+                                    ],
+                                    "Resource": "arn:aws:logs:*:*:*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "RuleSetE30C6C48": {
+            "Type": "AWS::SES::ReceiptRuleSet"
+        },
+        "SESReceiptRule": {
+            "Type": "AWS::SES::ReceiptRule",
+            "Properties": {
+                "RuleSetName": { "Ref": "RuleSetE30C6C48"},
+                "Rule": {
+                    "Name": "Inbound",
+                    "Enabled": true,
+                    "Actions": [
+                        {
+                            "S3Action": {
+                                "BucketName": { "Ref": "B1" }
+                            }
+                        }
+                    ],
+                    "ScanEnabled" : true
+                }
+            }
+        }
+    }
+}
